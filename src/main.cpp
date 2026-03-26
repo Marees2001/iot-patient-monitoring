@@ -94,17 +94,17 @@ void loop() {
   }
   
 
-  // // put your main code here, to run repeatedly:
-  // if (Serial.available()) {
-  //   char usbChar[200];
-  //   Serial.readBytes(usbChar, sizeof(usbChar));
-  //   Serial.print("USB received: ");
-  //   Serial.println(usbChar);
-  //   // Forward USB data to GSM
-  //   GSM_SERIAL.print(usbChar);
-  //   GSM_SERIAL.print("\r\n");
-  //   Serial.println("Sending AT command to GSM...");
-  // }
+  // put your main code here, to run repeatedly:
+  if (Serial.available()) {
+    char usbChar[200];
+    Serial.readBytes(usbChar, sizeof(usbChar));
+    Serial.print("USB received: ");
+    Serial.println(usbChar);
+    // Forward USB data to GSM
+    GSM_SERIAL.print(usbChar);
+    GSM_SERIAL.print("\r\n");
+    Serial.println("Sending AT command to GSM...");
+  }
 
   if(millis() - sensor_read_timeout > 1000){
     read_th_sensor();
