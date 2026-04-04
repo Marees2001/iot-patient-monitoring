@@ -29,4 +29,14 @@
 #define BITCLEAR(value, bit) (value &= ~(1 << bit)) // Macro to clear a specific bit in a value
 #define BITTOGGLE(value, bit) (value ^= (1 << bit)) // Macro to toggle
 
+
+//Enum definitions
+enum STATUS{
+    NONE,
+    SEND_STATUS,
+    SEND_CONF,
+    UPDT_CONF,
+    READ_SMS
+};
+
 #endif // DEFINE_H

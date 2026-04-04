@@ -6,7 +6,6 @@ DHT dht(TH_SENSOR_Pin, DHTTYPE);
 
 // I2C address (try 0x3C if not worki
 TwoWire i2c(MCU_SDA_Pin,MCU_SCL_Pin);
-Adafruit_SSD1306 display(SCREEN_WIDTH, SCREEN_HEIGHT, &i2c, -1);
 
 char gsm_rx_buffer[200]; // Buffer for receiving data from GSM module
 uint8_t receive_bytes = 0;
@@ -26,7 +25,7 @@ void setup() {
   init_controler();
 
   // put your setup code here, to run once:
-  Serial.println("\n\n=== IoT Livestock Monitoring System ===");
+  Serial.println("\n\n=== IoT Patient Monitoring System ===");
   Serial.println("System initialized successfully");
   // delay(5000);
   i2c.begin();  // SDA, SCL (VERY IMPORTANT)
@@ -46,20 +45,7 @@ void setup() {
     delay(500);
   }
   Serial.printf("Scan completed...\n\r");
-  
-  Serial.println("Initializing OLED...");
-  // Initialize OLED
-  while (!display.begin(SSD1306_SWITCHCAPVCC, OLED_ADDR)) {
-    Serial.println("SSD1306 init failed!");
-    delay(2000);
-  }
-  Serial.println("OLED Initialized!");
 
-  // Clear screen
-  display.clearDisplay();   // Clear buffer
-  display.setCursor(0, 0);  // Reset cursor
-  display.print("Hello");
-  display.display();        // Push to OLED
   dht.begin();
 
   // while(!hbt.begin((PULSEOXIMETER_DEBUGGINGMODE_PULSEDETECT))) {
@@ -76,14 +62,14 @@ void loop() {
   static unsigned long sensor_read_timeout = 0; // Variable to track sensor reading timing
   static unsigned long display_update_timeout = 0; // Variable to track display update timing
   /*Function for receiving data from GSM module*/
-  //gsm_receive_data();
+  gsm_receive_data();
 
   if(millis() - gsm_sync_timeout > 2000) { // Check if 0.5 seconds have passed since the last GSM synchronization
-    //gsm_sync_timeout = millis(); // Update the last synchronization time
+    gsm_sync_timeout = millis(); // Update the last synchronization time
     // Toggle LED state using STM32 HAL
     digitalToggle(STATUS_LED_Pin);      // Push to OLED
     if(ipm.sta.init_gsm != 0xFF) { // Sync GSM every 0.1 seconds
-      //sync_gsm();
+      sync_gsm();
     }else { // If GSM is fully initialized, perform main operations
       // Main operations here (e.g., read sensors, update display, control actuators)
       printf("GSM fully initialized\n\r");
@@ -107,7 +93,7 @@ void loop() {
   }
 
   if(millis() - sensor_read_timeout > 1000){
-    read_th_sensor();
+    //read_th_sensor();
     read_hrt_pulse();
   }
 }

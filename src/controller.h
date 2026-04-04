@@ -8,8 +8,6 @@
 #include "define.h"
 #include <Wire.h>
 #include "MAX30100_PulseOximeter.h"
-#include <Adafruit_GFX.h>
-#include <Adafruit_SSD1306.h>
 #include "DHT.h"
 
 extern char gsm_rx_buffer[200]; // Buffer for receiving data from GSM module
@@ -26,6 +24,7 @@ struct CONTROLLER_STATUS {
     uint8_t rssi; // GSM signal strength (0-31)
     uint8_t sim_status; // SIM card status (0: not inserted, 1: ready)
     uint8_t alm_sta; // Alarm status (0 or 1)
+    uint8_t lst_msg_idx;
 };
 
 /*Structure for controller settings*/
@@ -40,17 +39,15 @@ struct CONTROLLER_SETTINGS {
     uint8_t mx_spo; // Max threshold for TDS; 
     //range 0-1000 ppm, where 0-300 ppm is considered good, 300-600 ppm is fair, and above 600 ppm is poor water quality
     uint8_t mn_spo; // Min threshold for TDS
+
 };
 
 /*Structure for controller operation*/
 struct CONTROLLER_OPERATION {
-    uint8_t lamp_ctrl; // Lamp control (0 or 1)
-    uint8_t fan_ctrl; // Fan control (0 or 1)
-    uint8_t fence_ctrl; // Fence control (0 or 1) 
     uint8_t alarm_ctrl; // Alarm control (0 or 1)
-    uint8_t valve_ctrl; // Valve control (0 or 1)
     uint8_t gsm_call_ctrl; // GSM call control (0 or 1)
     uint8_t gsm_sms_ctrl; // GSM SMS control (0 or 1)
+    char lst_mob_req[15];
 };
 
 struct IOT_PATIENT_MONITORING {
@@ -65,9 +62,6 @@ void init_controler(){
     digitalWrite(STATUS_LED_Pin, LOW); // LED off (inverted logic on Blue Pill)
 
     pinMode(TH_SENSOR_Pin,INPUT_PULLUP);
-
-    pinMode(MCU_SDA_Pin,INPUT_PULLUP);
-    pinMode(MCU_SCL_Pin,INPUT_PULLUP);
     
 }
 
@@ -77,6 +71,14 @@ void gsm_send_data(const char* data){
     Serial.println(data);
     GSM_SERIAL.print(data);
     GSM_SERIAL.print("\r\n");
+}
+
+void gsm_send_dashboard(){
+    char buff[200];
+    memset(buff,0,sizeof(buff));
+    sprintf(buff,"1.Temprature:%.2f C  2.Humidity:%00d%% 3.Heartbeat: %d bpm 4.SPO2: %d%%",
+        ipm.sta.temp_value,ipm.sta.hum_value,ipm.sta.hrt_value,ipm.sta.spo_value);
+    gsm_send_data(buff);
 }
 
 // GSM function for receive data via UART
@@ -92,7 +94,7 @@ void gsm_receive_data(){
         }
          Serial.printf("GSM received: %s\n\r", gsm_rx_buffer); // Print the received GSM response for debu
     }
-
+    
     // Process the received data as needed
     if(!BITREAD(ipm.sta.init_gsm, 0) && strstr(gsm_rx_buffer, "OK")) {
         BITSET(ipm.sta.init_gsm, 0); // Basic command to check communication
@@ -110,6 +112,110 @@ void gsm_receive_data(){
         BITSET(ipm.sta.init_gsm, 6); // Mark test SMS sent as done
     } else if(!BITREAD(ipm.sta.init_gsm, 7) && strstr(gsm_rx_buffer, "OK")) {
         BITSET(ipm.sta.init_gsm, 7); // Mark end of SMS message set as done
+    }else if(strstr(gsm_rx_buffer, "+CMTI:")) {
+        uint8_t lst_sms_idx = 0;
+        sscanf(gsm_rx_buffer, "+CMTI: %*s,%d", &lst_sms_idx);
+        char buff[20];
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGD=%d",lst_sms_idx);
+        gsm_send_data(buff);
+    }else if(strstr(gsm_rx_buffer, "+CMGR:")) {
+        sscanf(gsm_rx_buffer, "+CMGR: %*s,%s,%*s,%*s", &ipm.opt.lst_mob_req);
+    }else if(strstr(gsm_rx_buffer, "Dashboard")) {
+        char buff[30];
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_dashboard();
+        delay(500);
+        GSM_SERIAL.write(26);
+    }else if(strstr(gsm_rx_buffer, "Modify")){
+        char buff[30];
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_data("What you want to modify? 1.Contact 2.Sensors");
+        delay(500);
+        GSM_SERIAL.write(26);
+    }else if(strstr(gsm_rx_buffer, "1.Contact")) {
+        char buff[30];
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_data("Fill the value. 1.Care taker:");
+        delay(500);
+        GSM_SERIAL.write(26);
+    }else if(strstr(gsm_rx_buffer, "Fill the value. 1.Care taker:")) {
+        char buff[100],num[15];
+        memset(num,0,sizeof(num));
+        sscanf(gsm_rx_buffer, "Fill the value. 1.Care taker:%s", &num);
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CPBW=1,\"%s\",145,\"Docter\"",num);
+        gsm_send_data(buff);
+        delay(500);
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_data("The modified successfully!!");
+        delay(500);
+        GSM_SERIAL.write(26);
+    }else if(strstr(gsm_rx_buffer, "2.Sensors")) {
+        char buff[30];
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_data("I can help you.What I do? 1.Set T/H 2.Set HBT/SPO2");
+        delay(500);
+        GSM_SERIAL.write(26);
+    }else if(strstr(gsm_rx_buffer, "1.Set T/H")){
+        char buff[30];
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_data("Fill the value. 1.Tmax: 2.Tmin: 3.Hmax: 4.Hmin:");
+        delay(500);
+        GSM_SERIAL.write(26);
+    }else if(strstr(gsm_rx_buffer, "2.Set HBT/SPO2")){
+        char buff[30];
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_data("Fill the value. 1.HBmax: 2.HBmin: 3.SPmax: 4.SPmin:");
+        delay(500);
+        GSM_SERIAL.write(26);
+    }else if(strstr(gsm_rx_buffer, "Fill the value. 1.Tmax:")) {
+        char buff[30];
+        sscanf(gsm_rx_buffer, "Fill the value. 1.Tmax:%f 2.Tmin:%f 3.Hmax:%d 4.Hmin:%d",
+            &ipm.conf.mx_temp,&ipm.conf.mn_temp,&ipm.conf.mx_hum,&ipm.conf.mn_hum);
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_data("The modified successfully!!");
+        delay(500);
+        GSM_SERIAL.write(26);
+        Serial.printf("1.Tmax:%f 2.Tmin:%f 3.Hmax:%d 4.Hmin:%d\r\n",
+        ipm.conf.mx_temp,ipm.conf.mn_temp,ipm.conf.mx_hum,ipm.conf.mn_hum);
+    }else if(strstr(gsm_rx_buffer, "Fill the value. 1.HBmax:")) {
+        char buff[30];
+        sscanf(gsm_rx_buffer, "Fill the value. 1.HBmax: 2.HBmin: 3.SPmax: 4.SPmin:",
+            &ipm.conf.mx_hrt,&ipm.conf.mn_hrt,&ipm.conf.mx_spo,&ipm.conf.mn_spo);
+        memset(buff,0,sizeof(buff));
+        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+        gsm_send_data(buff);
+        delay(500);
+        gsm_send_data("The modified successfully!!");
+        delay(500);
+        GSM_SERIAL.write(26);
+        Serial.printf("1.HBmax:%d 2.HBmin:%d 3.SPmax:%d 4.SPmin:%d\r\n",
+        ipm.conf.mx_hrt,ipm.conf.mn_hrt,ipm.conf.mx_spo,ipm.conf.mn_spo);
     }
 }
 
