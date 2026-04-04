@@ -8,6 +8,7 @@
 #include "define.h"
 #include <Wire.h>
 #include "MAX30100_PulseOximeter.h"
+#include <LiquidCrystal_I2C.h>
 #include "DHT.h"
 
 extern char gsm_rx_buffer[200]; // Buffer for receiving data from GSM module
@@ -65,6 +66,7 @@ void init_controler(){
     
 }
 
+
 // GSM function for send data via UART
 void gsm_send_data(const char* data){
     Serial.print(">> Sending: ");
@@ -113,109 +115,168 @@ void gsm_receive_data(){
     } else if(!BITREAD(ipm.sta.init_gsm, 7) && strstr(gsm_rx_buffer, "OK")) {
         BITSET(ipm.sta.init_gsm, 7); // Mark end of SMS message set as done
     }else if(strstr(gsm_rx_buffer, "+CMTI:")) {
-        uint8_t lst_sms_idx = 0;
-        sscanf(gsm_rx_buffer, "+CMTI: %*s,%d", &lst_sms_idx);
+        int lst_sms_idx = 0;
+         char *cmti_ptr = strstr(gsm_rx_buffer, "+CMTI:");
+        if(cmti_ptr) {
+            sscanf(cmti_ptr, "+CMTI: %*[^,],%d", &lst_sms_idx);
+        }
         char buff[20];
         memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGD=%d",lst_sms_idx);
+        sprintf(buff,"AT+CMGR=%d",lst_sms_idx);
         gsm_send_data(buff);
+        Serial.printf("lst_sms_idx->%d\n\r",lst_sms_idx);
     }else if(strstr(gsm_rx_buffer, "+CMGR:")) {
-        sscanf(gsm_rx_buffer, "+CMGR: %*s,%s,%*s,%*s", &ipm.opt.lst_mob_req);
-    }else if(strstr(gsm_rx_buffer, "Dashboard")) {
-        char buff[30];
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_dashboard();
-        delay(500);
-        GSM_SERIAL.write(26);
-    }else if(strstr(gsm_rx_buffer, "Modify")){
-        char buff[30];
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_data("What you want to modify? 1.Contact 2.Sensors");
-        delay(500);
-        GSM_SERIAL.write(26);
-    }else if(strstr(gsm_rx_buffer, "1.Contact")) {
-        char buff[30];
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_data("Fill the value. 1.Care taker:");
-        delay(500);
-        GSM_SERIAL.write(26);
-    }else if(strstr(gsm_rx_buffer, "Fill the value. 1.Care taker:")) {
-        char buff[100],num[15];
-        memset(num,0,sizeof(num));
-        sscanf(gsm_rx_buffer, "Fill the value. 1.Care taker:%s", &num);
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CPBW=1,\"%s\",145,\"Docter\"",num);
-        gsm_send_data(buff);
-        delay(500);
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_data("The modified successfully!!");
-        delay(500);
-        GSM_SERIAL.write(26);
-    }else if(strstr(gsm_rx_buffer, "2.Sensors")) {
-        char buff[30];
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_data("I can help you.What I do? 1.Set T/H 2.Set HBT/SPO2");
-        delay(500);
-        GSM_SERIAL.write(26);
-    }else if(strstr(gsm_rx_buffer, "1.Set T/H")){
-        char buff[30];
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_data("Fill the value. 1.Tmax: 2.Tmin: 3.Hmax: 4.Hmin:");
-        delay(500);
-        GSM_SERIAL.write(26);
-    }else if(strstr(gsm_rx_buffer, "2.Set HBT/SPO2")){
-        char buff[30];
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_data("Fill the value. 1.HBmax: 2.HBmin: 3.SPmax: 4.SPmin:");
-        delay(500);
-        GSM_SERIAL.write(26);
-    }else if(strstr(gsm_rx_buffer, "Fill the value. 1.Tmax:")) {
-        char buff[30];
-        sscanf(gsm_rx_buffer, "Fill the value. 1.Tmax:%f 2.Tmin:%f 3.Hmax:%d 4.Hmin:%d",
-            &ipm.conf.mx_temp,&ipm.conf.mn_temp,&ipm.conf.mx_hum,&ipm.conf.mn_hum);
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_data("The modified successfully!!");
-        delay(500);
-        GSM_SERIAL.write(26);
-        Serial.printf("1.Tmax:%f 2.Tmin:%f 3.Hmax:%d 4.Hmin:%d\r\n",
-        ipm.conf.mx_temp,ipm.conf.mn_temp,ipm.conf.mx_hum,ipm.conf.mn_hum);
-    }else if(strstr(gsm_rx_buffer, "Fill the value. 1.HBmax:")) {
-        char buff[30];
-        sscanf(gsm_rx_buffer, "Fill the value. 1.HBmax: 2.HBmin: 3.SPmax: 4.SPmin:",
-            &ipm.conf.mx_hrt,&ipm.conf.mn_hrt,&ipm.conf.mx_spo,&ipm.conf.mn_spo);
-        memset(buff,0,sizeof(buff));
-        sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
-        gsm_send_data(buff);
-        delay(500);
-        gsm_send_data("The modified successfully!!");
-        delay(500);
-        GSM_SERIAL.write(26);
-        Serial.printf("1.HBmax:%d 2.HBmin:%d 3.SPmax:%d 4.SPmin:%d\r\n",
-        ipm.conf.mx_hrt,ipm.conf.mn_hrt,ipm.conf.mx_spo,ipm.conf.mn_spo);
+        char *cmgr_ptr = strstr(gsm_rx_buffer, "+CMGR:");
+        Serial.printf("RAW: [%s]\n\r", cmgr_ptr);
+        if(cmgr_ptr) {
+            sscanf(cmgr_ptr, "+CMGR: %*[^,],\"%[^\"]\"", ipm.opt.lst_mob_req);
+            Serial.printf("Phone parsed: [%s]\n\r", ipm.opt.lst_mob_req);
+        }
+        if(strstr(gsm_rx_buffer, "Dashboard")) {
+            char buff[30];
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_dashboard();
+            delay(500);
+            GSM_SERIAL.write(26);
+        }else if(strstr(gsm_rx_buffer, "Modify")){
+            char buff[30];
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("What you want to modify? 1.Contact 2.Sensors");
+            delay(500);
+            GSM_SERIAL.write(26);
+        }else if(strstr(gsm_rx_buffer, "1.Contact")) {
+            char buff[30];
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("What you want to modify? 1.Owner: 2.Doctor:");
+            delay(500);
+            GSM_SERIAL.write(26);
+        }else if(strstr(gsm_rx_buffer, "1.Owner:")) {
+            char buff[100],num[15];
+            memset(num,0,sizeof(num));
+            char *owner_ptr = strstr(gsm_rx_buffer, "1.Owner:");
+            if(owner_ptr) {
+                sscanf(owner_ptr, "1.Owner: %s", num);  // num not &num
+                // trim any \r\n at end
+                num[strcspn(num, "\r\n")] = 0;
+                Serial.printf("Owner num: [%s]\n\r", num);
+            }
+
+            memset(buff, 0, sizeof(buff));
+            sprintf(buff, "AT+CPBW=1,\"%s\",145,\"Owner\"", num);
+            gsm_send_data(buff);
+            delay(500);
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("The modified successfully!!");
+            delay(500);
+            GSM_SERIAL.write(26);
+        }else if(strstr(gsm_rx_buffer, "2.Doctor:")) {
+            char buff[100],num[15];
+            memset(num,0,sizeof(num));
+            char *owner_ptr = strstr(gsm_rx_buffer, "1.Doctor:");
+            if(owner_ptr) {
+                sscanf(owner_ptr, "1.Doctor: %s", num);  // num not &num
+                // trim any \r\n at end
+                num[strcspn(num, "\r\n")] = 0;
+                Serial.printf("Doctor num: [%s]\n\r", num);
+            }
+
+            memset(buff, 0, sizeof(buff));
+            sprintf(buff, "AT+CPBW=1,\"%s\",145,\"Doctor\"", num);
+            gsm_send_data(buff);
+            delay(500);
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("The modified successfully!!");
+            delay(500);
+            GSM_SERIAL.write(26);
+        }else if(strstr(gsm_rx_buffer, "2.Sensors")) {
+            char buff[30];
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("I can help you.What I do? 1.Set T/H 2.Set TDS");
+            delay(500);
+            GSM_SERIAL.write(26);
+        }else if(strstr(gsm_rx_buffer, "1.Set T/H")){
+            char buff[30];
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("Fill the value. 1.Tmax: 2.Tmin: 3.Hmax: 4.Hmin:");
+            delay(500);
+            GSM_SERIAL.write(26);
+        }else if(strstr(gsm_rx_buffer, "2.Set SPO")){
+            char buff[30];
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("Fill the value. 1.HRTmax: 2.HRTmin: 3.SPO2max: 4.SPO2min:");
+            delay(500);
+            GSM_SERIAL.write(26);
+        }else if(strstr(gsm_rx_buffer, "Fill the value. 1.Tmax:")) {
+            char buff[30];
+            sscanf(gsm_rx_buffer, "Fill the value. 1.Tmax:%f 2.Tmin:%f 3.Hmax:%d 4.Hmin:%d",
+                &ipm.conf.mx_temp,&ipm.conf.mn_temp,&ipm.conf.mx_hum,&ipm.conf.mn_hum);
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("The modified successfully!!");
+            delay(500);
+            GSM_SERIAL.write(26);
+            Serial.printf("1.Tmax:%f 2.Tmin:%f 3.Hmax:%d 4.Hmin:%d\r\n",
+            ipm.conf.mx_temp,ipm.conf.mn_temp,ipm.conf.mx_hum,ipm.conf.mn_hum);
+            //Store the value
+            //save_to_flash(&ipm.conf,sizeof(ipm.conf));
+        }else if(strstr(gsm_rx_buffer, "Fill the value. 1.HRTmax:")) {
+            char buff[30];
+            sscanf(gsm_rx_buffer, "Fill the value. 1.HRTmax:%d 2.HRTmin:%d 3.SPO2max:%d 4.SPO2min:%d",
+                &ipm.conf.mx_hrt,&ipm.conf.mn_hrt,&ipm.conf.mx_spo,&ipm.conf.mn_spo);
+            memset(buff,0,sizeof(buff));
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            gsm_send_data("The modified successfully!!");
+            delay(500);
+            GSM_SERIAL.write(26);
+            Serial.printf("1.HRTmax:%d 2.HRTmin:%d 3.SPO2max:%d 4.SPO2min:%d\r\n",
+            ipm.conf.mx_hrt,ipm.conf.mn_hrt,ipm.conf.mx_spo,ipm.conf.mn_spo);
+            //Store the value
+            //save_to_flash(&ipm.conf,sizeof(ipm.conf));
+        }else if(strstr(gsm_rx_buffer, "Location")) {
+            char buff[100];
+            memset(buff,0,sizeof(buff));
+            String lat = "12.978208332240508";
+            String lon = "79.96812928984802";
+
+            sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
+            gsm_send_data(buff);
+            delay(500);
+            memset(buff,0,sizeof(buff));
+            sprintf(buff, "https://www.google.com/maps?q=%s,%s", lat.c_str(), lon.c_str());
+            gsm_send_data(buff);
+            delay(500);
+            GSM_SERIAL.write(26);
+            Serial.printf("Sent location: %s\n\r", buff);
+        }
+
     }
 }
 

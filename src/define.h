@@ -3,11 +3,12 @@
 
 // USART1 for GSM module (PA9=TX, PA10=RX)
 #define GSM_SERIAL Serial1
-#define OLED_ADDR 0x3C
 #define MAX30102_ADDR 0x57
 #define DHTTYPE DHT22
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
+
+#define LCD_ADDR 0x27  // I2C address for 16x4 LCD display
+#define LCD_COLS 16    // LCD display columns
+#define LCD_ROWS 2     // LCD display rows
 
 #define STATUS_LED_Pin PC13
 #define RELAY_FENCE_Pin PA5
