@@ -18,8 +18,12 @@
 #define TH_SENSOR_Pin PB1
 #define GSM_RX_Pin PA9
 #define GSM_TX_Pin PA10
+#define GPS_RX_Pin PB11
+#define GPS_TX_Pin PB10
 #define MCU_SCL_Pin PB6
 #define MCU_SDA_Pin PB7
+#define ALARM_BUZZER_Pin PB12
+#define USER_BUTTON_Pin PB13
 
 
 

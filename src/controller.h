@@ -10,9 +10,14 @@
 #include "MAX30100_PulseOximeter.h"
 #include <LiquidCrystal_I2C.h>
 #include "DHT.h"
+#include "flash.h"
 
 extern char gsm_rx_buffer[200]; // Buffer for receiving data from GSM module
 extern uint8_t receive_bytes; // Number of bytes received from GSM module
+extern LiquidCrystal_I2C lcd; // I2C LCD display object
+extern PulseOximeter hbt;
+extern DHT dht; // DHT sensor object
+extern uint8_t pulse_sensor_status;
 
 /*Structure for controller status*/
 struct CONTROLLER_STATUS {
@@ -21,7 +26,7 @@ struct CONTROLLER_STATUS {
     float hrt_value; // TDS sensor value
     int spo_value; // TDS sensor value
     float temp_value; // Temperature sensor value
-    float hum_value; // Humidity sensor value
+    uint8_t hum_value; // Humidity sensor value
     uint8_t rssi; // GSM signal strength (0-31)
     uint8_t sim_status; // SIM card status (0: not inserted, 1: ready)
     uint8_t alm_sta; // Alarm status (0 or 1)
@@ -30,6 +35,9 @@ struct CONTROLLER_STATUS {
 
 /*Structure for controller settings*/
 struct CONTROLLER_SETTINGS {
+    uint32_t magic;
+    char home_mob[15]; // Home mobile number for GSM communication
+    char emg_mob[15]; // Emergency mobile number for GSM communication
     uint8_t mx_temp; // Max threshold for temperature
     uint8_t mn_temp; // Min threshold for temperature
     uint8_t mx_hum; // Max threshold for humidity
@@ -57,15 +65,102 @@ struct IOT_PATIENT_MONITORING {
     struct CONTROLLER_OPERATION opt; // Current operation of the controller
 }ipm;
 
-void init_controler(){
-    // Initialize LED pin
-    pinMode(STATUS_LED_Pin, OUTPUT);
-    digitalWrite(STATUS_LED_Pin, LOW); // LED off (inverted logic on Blue Pill)
 
-    pinMode(TH_SENSOR_Pin,INPUT_PULLUP);
-    
+void init_display(){
+    lcd.init();
+    lcd.backlight();
+    lcd.blink_off();
+    lcd.setCursor(2, 0);
+    lcd.print("IOT Patient");
+    lcd.setCursor(3, 1);
+    lcd.print("Monitoring");
+    delay(2000);
 }
 
+void TH_detect() {
+    // This function can be used to handle any specific logic when the temperature/humidity sensor is triggered
+    // For example, you could read the sensor values and update the display or send an alert
+    // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
+    ipm.sta.temp_value = dht.readTemperature();
+    // Read temperature as Celsius (the default)
+    ipm.sta.hum_value = dht.readHumidity();
+    Serial.println("Temperature/Humidity sensor triggered");
+}
+
+
+void onBeatDetected() {
+    Serial.println("Beat detected!");
+    if(pulse_sensor_status) { // Only read if pulse sensor initialized successfully  
+        ipm.sta.hrt_value =  hbt.getHeartRate();
+        ipm.sta.spo_value = hbt.getSpO2();
+    }
+}
+
+void update_display() {
+   lcd.clear();
+
+    // Row 1
+    lcd.setCursor(0, 0);
+    lcd.print("T:");
+    lcd.print(ipm.sta.temp_value, 1); // 1 decimal
+    lcd.print("C ");
+
+    lcd.print("H:");
+    lcd.print(ipm.sta.hum_value, 0);
+    lcd.print("%");
+
+    // Row 2
+    lcd.setCursor(0, 1);
+    lcd.print("HR:");
+    lcd.print(ipm.sta.hrt_value);
+    lcd.print(" ");
+
+    lcd.print("S:");
+    lcd.print(ipm.sta.spo_value);
+    lcd.print("%");
+}
+
+void read_th_sensor(){
+  Serial.println("Tempratur : " + String(ipm.sta.temp_value) + "C");
+  Serial.println("Humitidy : " + String(ipm.sta.hum_value) + "%");
+
+  if((ipm.sta.temp_value > ipm.conf.mx_temp || ipm.sta.temp_value < ipm.conf.mn_temp)
+  && ipm.sta.temp_value != 0) {
+    ipm.opt.alarm_ctrl = 1; // Activate alarm control
+    ipm.opt.gsm_call_ctrl = 1; // Activate GSM call control
+    ipm.opt.gsm_sms_ctrl = 1; // Activate GSM SMS control
+  } else if((ipm.sta.hum_value > ipm.conf.mx_hum || ipm.sta.hum_value < ipm.conf.mn_hum)
+  && ipm.sta.hum_value != 0) {
+    ipm.opt.alarm_ctrl = 1; // Activate alarm control if humidity is out of range
+    ipm.opt.gsm_call_ctrl = 1; // Activate GSM call control
+    ipm.opt.gsm_sms_ctrl = 1; // Activate GSM SMS control 
+  } else {
+    ipm.opt.alarm_ctrl = 0; // Clear alarm control if all readings are normal
+    ipm.opt.gsm_call_ctrl = 0; // Clear GSM call control
+    ipm.opt.gsm_sms_ctrl = 0; // Clear GSM SMS control
+  }
+
+}
+
+void read_hrt_pulse(){
+  Serial.println("Heart rate : " + String(ipm.sta.hrt_value)+" bpm");
+  Serial.println("SPO2  rate : " + String(ipm.sta.spo_value) + " %");
+  if((ipm.sta.hrt_value > ipm.conf.mx_hrt || ipm.sta.hrt_value < ipm.conf.mn_hrt) 
+  && ipm.sta.hrt_value != 0) {
+    ipm.opt.alarm_ctrl = 1; // Activate alarm control
+    ipm.opt.gsm_call_ctrl = 1; // Activate GSM call control
+    ipm.opt.gsm_sms_ctrl = 1; // Activate GSM SMS control   
+  } else if((ipm.sta.spo_value > ipm.conf.mx_spo || ipm.sta.spo_value < ipm.conf.mn_spo) 
+  && ipm.sta.spo_value != 0) {
+    ipm.opt.alarm_ctrl = 1; // Activate alarm control if SpO2 is out of range
+    ipm.opt.gsm_call_ctrl = 1; // Activate GSM call control
+    ipm.opt.gsm_sms_ctrl = 1; // Activate GSM SMS control 
+  } else {
+    ipm.opt.alarm_ctrl = 0; // Clear alarm control if all readings are normal
+    ipm.opt.gsm_call_ctrl = 0; // Clear GSM call control
+    ipm.opt.gsm_sms_ctrl = 0; // Clear GSM SMS control
+  }
+}
 
 // GSM function for send data via UART
 void gsm_send_data(const char* data){
@@ -168,12 +263,14 @@ void gsm_receive_data(){
                 // trim any \r\n at end
                 num[strcspn(num, "\r\n")] = 0;
                 Serial.printf("Owner num: [%s]\n\r", num);
+                memccpy(ipm.conf.home_mob, num, '\0', sizeof(ipm.conf.home_mob)); // Store the new home mobile number in configuration
+                save_to_flash(&ipm.conf,sizeof(ipm.conf));
             }
 
-            memset(buff, 0, sizeof(buff));
-            sprintf(buff, "AT+CPBW=1,\"%s\",145,\"Owner\"", num);
-            gsm_send_data(buff);
-            delay(500);
+            // memset(buff, 0, sizeof(buff));
+            // sprintf(buff, "AT+CPBW=1,\"%s\",145,\"Owner\"", num);
+            // gsm_send_data(buff);
+            // delay(500);
             memset(buff,0,sizeof(buff));
             sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
             gsm_send_data(buff);
@@ -190,12 +287,14 @@ void gsm_receive_data(){
                 // trim any \r\n at end
                 num[strcspn(num, "\r\n")] = 0;
                 Serial.printf("Doctor num: [%s]\n\r", num);
+                memccpy(ipm.conf.emg_mob, num, '\0', sizeof(ipm.conf.emg_mob)); // Store the new emergency mobile number in configuration
+                save_to_flash(&ipm.conf,sizeof(ipm.conf)); // Save the updated configuration to flash memory
             }
 
-            memset(buff, 0, sizeof(buff));
-            sprintf(buff, "AT+CPBW=1,\"%s\",145,\"Doctor\"", num);
-            gsm_send_data(buff);
-            delay(500);
+            // memset(buff, 0, sizeof(buff));
+            // sprintf(buff, "AT+CPBW=1,\"%s\",145,\"Doctor\"", num);
+            // gsm_send_data(buff);
+            // delay(500);
             memset(buff,0,sizeof(buff));
             sprintf(buff,"AT+CMGS=\"%s\"",ipm.opt.lst_mob_req);
             gsm_send_data(buff);
@@ -244,7 +343,7 @@ void gsm_receive_data(){
             Serial.printf("1.Tmax:%f 2.Tmin:%f 3.Hmax:%d 4.Hmin:%d\r\n",
             ipm.conf.mx_temp,ipm.conf.mn_temp,ipm.conf.mx_hum,ipm.conf.mn_hum);
             //Store the value
-            //save_to_flash(&ipm.conf,sizeof(ipm.conf));
+            save_to_flash(&ipm.conf,sizeof(ipm.conf));
         }else if(strstr(gsm_rx_buffer, "Fill the value. 1.HRTmax:")) {
             char buff[30];
             sscanf(gsm_rx_buffer, "Fill the value. 1.HRTmax:%d 2.HRTmin:%d 3.SPO2max:%d 4.SPO2min:%d",
@@ -259,7 +358,7 @@ void gsm_receive_data(){
             Serial.printf("1.HRTmax:%d 2.HRTmin:%d 3.SPO2max:%d 4.SPO2min:%d\r\n",
             ipm.conf.mx_hrt,ipm.conf.mn_hrt,ipm.conf.mx_spo,ipm.conf.mn_spo);
             //Store the value
-            //save_to_flash(&ipm.conf,sizeof(ipm.conf));
+            save_to_flash(&ipm.conf,sizeof(ipm.conf));
         }else if(strstr(gsm_rx_buffer, "Location")) {
             char buff[100];
             memset(buff,0,sizeof(buff));
@@ -293,6 +392,28 @@ void sync_gsm() {
     else if(!BITREAD(ipm.sta.init_gsm, 7)) GSM_SERIAL.write(26); // set end of SMS message (Ctrl+Z)
 }
 
+void init_controler(){
+    // Initialize LED pin
+    pinMode(STATUS_LED_Pin, OUTPUT);
+    digitalWrite(STATUS_LED_Pin, LOW); // LED off (inverted logic on Blue Pill)
 
+    pinMode(TH_SENSOR_Pin,INPUT_PULLUP);
+    pinMode(ALARM_BUZZER_Pin, OUTPUT);
+    pinMode(USER_BUTTON_Pin, INPUT_PULLUP);
+
+    attachInterrupt(digitalPinToInterrupt(TH_SENSOR_Pin), TH_detect, FALLING); // Attach interrupt to user button for temperature/humidity detection
+    
+    read_from_flash(&ipm.conf,sizeof(ipm.conf)); // Load configuration from flash memory
+    Serial.println("Controller initialized with following configuration:");
+    Serial.printf("Home Mobile: %s\n\r", ipm.conf.home_mob);
+    Serial.printf("Emergency Mobile: %s\n\r", ipm.conf.emg_mob);
+    Serial.printf("Temperature Thresholds: Min=%d C, Max=%d C\n\r", ipm.conf.mn_temp, ipm.conf.mx_temp);
+    Serial.printf("Humidity Thresholds: Min=%d %%, Max=%d %%\n\r", ipm.conf.mn_hum, ipm.conf.mx_hum);
+    Serial.printf("Heart Rate Thresholds: Min=%d bpm, Max=%d bpm\n\r", ipm.conf.mn_hrt, ipm.conf.mx_hrt);
+    Serial.printf("SpO2 Thresholds: Min=%d %%, Max=%d %%\n\r", ipm.conf.mn_spo, ipm.conf.mx_spo);
+    
+    ipm.conf.magic = FLASH_MAGIC;
+
+}
 
 #endif // CONTROLLER_H

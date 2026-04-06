@@ -48,14 +48,10 @@ void setup() {
   // }
   // Serial.printf("Scan completed...\n\r");
 
-  lcd.init();
-  lcd.backlight();
-  lcd.blink_on();
-  lcd.setCursor(0, 0);
-  lcd.print("Patient Monitor");
+  init_display();
 
-  dht.begin(3);
-  //hbt.setOnBeatDetectedCallback(onBeatDetected);
+  dht.begin();
+  hbt.setOnBeatDetectedCallback(onBeatDetected);
 }
 
 void loop() {
@@ -64,8 +60,13 @@ void loop() {
   static unsigned long sensor_read_timeout = 0; // Variable to track sensor reading timing
   static unsigned long display_update_timeout = 0; // Variable to track display update timing
   static unsigned long init_pulse_sensor_timeout = 0; // Variable to track pulse sensor initialization timing
+  static unsigned long display_timout = 0; // Variable to track display update timing
+  static unsigned long gsm_call_timeout = 0; 
+  static unsigned long gsm_sms_timeout = 0;
   /*Function for receiving data from GSM module*/
   gsm_receive_data();
+
+  hbt.update(); // Update pulse oximeter readings
 
   if(millis() - gsm_sync_timeout > 2000) { // Check if 0.5 seconds have passed since the last GSM synchronization
     gsm_sync_timeout = millis(); // Update the last synchronization time
@@ -73,16 +74,64 @@ void loop() {
     digitalToggle(STATUS_LED_Pin);      // Push to OLED
     if(ipm.sta.init_gsm != 0xFF) { // Sync GSM every 0.1 seconds
       sync_gsm();
+    }else {
+
+      if(ipm.opt.gsm_sms_ctrl && (millis() - gsm_sms_timeout > 5000)) { // If GSM SMS control is active and 60 seconds have passed since the last SMS attempt
+        gsm_sms_timeout = millis(); // Update the last SMS attempt time
+        // Implement GSM SMS control logic here (e.g., send an SMS if not already sent)
+        if(ipm.opt.gsm_sms_ctrl==1) {
+          char buff[30];
+          memset(buff,0,sizeof(buff));
+          sprintf(buff,"AT+CMGS=\"%s\"",ipm.conf.home_mob);
+          gsm_send_data(buff);
+          delay(500);
+          gsm_send_dashboard();
+          delay(500);
+          GSM_SERIAL.write(26); // Send Ctrl+Z to indicate end of SMS message
+          ipm.opt.gsm_sms_ctrl = 2; // Mark SMS as sent
+        } else if(ipm.opt.gsm_sms_ctrl==2) {
+          ipm.opt.gsm_sms_ctrl = 0; // Reset SMS control to allow future SMS messages
+          char buff[30];
+          memset(buff,0,sizeof(buff));
+          sprintf(buff,"AT+CMGS=\"%s\"",ipm.conf.emg_mob);
+          gsm_send_data(buff);
+          delay(500);
+          gsm_send_dashboard();
+          delay(500);
+          GSM_SERIAL.write(26); // Send Ctrl+Z to indicate end of SMS message
+        }
+      }
+      
+      // Serial.println("GSM synchronization completed");
+      if(ipm.opt.gsm_call_ctrl && (millis() - gsm_call_timeout > 30000)
+      && !ipm.opt.gsm_sms_ctrl) { // If GSM call control is active and 30 seconds have passed since the last call attempt
+        gsm_call_timeout = millis(); // Update the last call attempt time
+        // Implement GSM call control logic here (e.g., make a call if not already in progress)
+        if(ipm.opt.gsm_call_ctrl==1) {
+          char buff[20];
+          memset(buff,0,sizeof(buff));
+          sprintf(buff,"ATD%s",ipm.conf.emg_mob);
+          gsm_send_data(buff);
+          ipm.opt.gsm_call_ctrl = 2; // Mark call as in progress
+        } else if(ipm.opt.gsm_call_ctrl==2) {
+          char buff[20];
+          memset(buff,0,sizeof(buff));
+          sprintf(buff,"ATD%s",ipm.conf.home_mob);
+          gsm_send_data(buff);
+          ipm.opt.gsm_call_ctrl = 0; // Reset call control to allow future calls
+        }
+      }
     }
     // Reading temperature or humidity takes about 250 milliseconds!
-
-
   }
 
+  ipm.opt.alarm_ctrl? digitalWrite(ALARM_BUZZER_Pin, HIGH) 
+  : digitalWrite(ALARM_BUZZER_Pin, LOW); // Set LED state based on alarm control
+
+  
   if(millis()-init_pulse_sensor_timeout > 5000 && pulse_sensor_status == 0) { // Try to initialize pulse sensor every 10 seconds if not initialized
     init_pulse_sensor_timeout = millis(); // Update the last initialization attempt time
-    unsigned long startTime = millis();
-    pulse_sensor_status = hbt.begin(PULSEOXIMETER_DEBUGGINGMODE_PULSEDETECT);
+    pulse_sensor_status = hbt.begin();
     pulse_sensor_status? Serial.println("Pulse oximeter initialized successfully") 
     : Serial.println("ERROR: Failed to initialize pulse oximeter");
   }
@@ -101,26 +150,16 @@ void loop() {
   }
 
   if(millis() - sensor_read_timeout > 1000){
-    //read_th_sensor();
-    //read_hrt_pulse();
+    sensor_read_timeout = millis();
+    read_th_sensor();
+    read_hrt_pulse();
+  }
+
+  if(millis() - display_timout > 2000){
+    //update_display();
+    display_timout = millis();
+    update_display();
   }
 }
 
 
-void read_th_sensor(){
-  // Sensor readings may also be up to 2 seconds 'old' (its a very slow sensor)
-  ipm.sta.temp_value = dht.readTemperature();
-  // Read temperature as Celsius (the default)
-  ipm.sta.hum_value = dht.readHumidity();
-  Serial.printf("Tempratur :%0.2f\n\r",ipm.sta.temp_value);
-  Serial.printf("Humitidy :%0.2f\n\r",ipm.sta.hum_value);
-}
-
-void read_hrt_pulse(){
-  if(pulse_sensor_status) { // Only read if pulse sensor initialized successfully  
-    ipm.sta.hrt_value =  hbt.getHeartRate();
-    ipm.sta.spo_value = hbt.getSpO2();
-  }
-  Serial.printf("Heart rate : %0.2f\n\r",ipm.sta.hrt_value);
-  Serial.printf("SPO2  rate : %d %\n\r",ipm.sta.spo_value);
-}
