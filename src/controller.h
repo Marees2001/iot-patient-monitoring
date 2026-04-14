@@ -18,6 +18,7 @@ extern LiquidCrystal_I2C lcd; // I2C LCD display object
 extern PulseOximeter hbt;
 extern DHT dht; // DHT sensor object
 extern uint8_t pulse_sensor_status;
+extern uint8_t hbt_intrupt_status;
 
 /*Structure for controller status*/
 struct CONTROLLER_STATUS {
@@ -90,10 +91,7 @@ void TH_detect() {
 
 void onBeatDetected() {
     Serial.println("Beat detected!");
-    if(pulse_sensor_status) { // Only read if pulse sensor initialized successfully  
-        ipm.sta.hrt_value =  hbt.getHeartRate();
-        ipm.sta.spo_value = hbt.getSpO2();
-    }
+    hbt_intrupt_status = 1; // Set the heartbeat interrupt status to indicate a beat was detected
 }
 
 void update_display() {
@@ -143,23 +141,25 @@ void read_th_sensor(){
 }
 
 void read_hrt_pulse(){
-  Serial.println("Heart rate : " + String(ipm.sta.hrt_value)+" bpm");
-  Serial.println("SPO2  rate : " + String(ipm.sta.spo_value) + " %");
-  if((ipm.sta.hrt_value > ipm.conf.mx_hrt || ipm.sta.hrt_value < ipm.conf.mn_hrt) 
-  && ipm.sta.hrt_value != 0) {
-    ipm.opt.alarm_ctrl = 1; // Activate alarm control
-    ipm.opt.gsm_call_ctrl = 1; // Activate GSM call control
-    ipm.opt.gsm_sms_ctrl = 1; // Activate GSM SMS control   
-  } else if((ipm.sta.spo_value > ipm.conf.mx_spo || ipm.sta.spo_value < ipm.conf.mn_spo) 
-  && ipm.sta.spo_value != 0) {
-    ipm.opt.alarm_ctrl = 1; // Activate alarm control if SpO2 is out of range
-    ipm.opt.gsm_call_ctrl = 1; // Activate GSM call control
-    ipm.opt.gsm_sms_ctrl = 1; // Activate GSM SMS control 
-  } else {
-    ipm.opt.alarm_ctrl = 0; // Clear alarm control if all readings are normal
-    ipm.opt.gsm_call_ctrl = 0; // Clear GSM call control
-    ipm.opt.gsm_sms_ctrl = 0; // Clear GSM SMS control
-  }
+    ipm.sta.hrt_value = hbt.getHeartRate();
+    ipm.sta.spo_value = hbt.getSpO2();
+    Serial.println("Heart rate : " + String(ipm.sta.hrt_value)+" bpm");
+    Serial.println("SPO2  rate : " + String(ipm.sta.spo_value) + " %");
+    if((ipm.sta.hrt_value > ipm.conf.mx_hrt || ipm.sta.hrt_value < ipm.conf.mn_hrt) 
+    && ipm.sta.hrt_value != 0) {
+        ipm.opt.alarm_ctrl = 1; // Activate alarm control
+        ipm.opt.gsm_call_ctrl = 1; // Activate GSM call control
+        ipm.opt.gsm_sms_ctrl = 1; // Activate GSM SMS control   
+    } else if((ipm.sta.spo_value > ipm.conf.mx_spo || ipm.sta.spo_value < ipm.conf.mn_spo) 
+    && ipm.sta.spo_value != 0) {
+        ipm.opt.alarm_ctrl = 1; // Activate alarm control if SpO2 is out of range
+        ipm.opt.gsm_call_ctrl = 1; // Activate GSM call control
+        ipm.opt.gsm_sms_ctrl = 1; // Activate GSM SMS control 
+    } else {
+        ipm.opt.alarm_ctrl = 0; // Clear alarm control if all readings are normal
+        ipm.opt.gsm_call_ctrl = 0; // Clear GSM call control
+        ipm.opt.gsm_sms_ctrl = 0; // Clear GSM SMS control
+    }
 }
 
 // GSM function for send data via UART
