@@ -80,7 +80,7 @@ bool read_from_flash(void* out, size_t size, uint32_t address = FLASH_STORAGE_AD
         Serial.println("WARN: No valid data in flash.");
         return false;
     }
-
+    
     return true;
 }
 
