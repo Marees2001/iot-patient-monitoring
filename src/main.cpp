@@ -92,16 +92,17 @@ void loop() {
     // Reading temperature or humidity takes about 250 milliseconds!
   }
 
-  if(millis() - gsm_clean_storage_timeout > 60000) { // Clean GSM storage every 60 seconds if GSM is fully initialized
+  if(ipm.sta.init_gsm == 0xFF && !ipm.opt.gsm_sms_ctrl && !ipm.opt.gsm_call_ctrl
+    && (millis() - gsm_clean_storage_timeout > 60000)) { // Clean GSM storage every 60 seconds if GSM is fully initialized
     gsm_clean_storage_timeout = millis(); // Update the last storage cleaning time
     clean_sim_storage();
     Serial.println("GSM storage cleaned");
   }
 
   if(ipm.opt.gsm_sms_ctrl && ipm.sta.init_gsm == 0xFF
-  && (millis() - gsm_sms_timeout > 5000L)) { // If GSM SMS control is active and 60 seconds have passed since the last SMS attempt
+  && (millis() > gsm_sms_timeout + 5000L)) { // If GSM SMS control is active and 60 seconds have passed since the last SMS attempt
     
-    Serial.println("Attempting to send GSM SMS... Timout: " + String(millis() - gsm_sms_timeout) + " ms");
+    Serial.println("Attempting to send GSM SMS... Timout: " + String(gsm_sms_timeout) + " ms");
     Serial.println("GSM SMS control state: " + String(ipm.opt.gsm_sms_ctrl));
     gsm_sms_timeout = millis(); // Update the last SMS attempt timem 
     // Implement GSM SMS control logic here (e.g., send an SMS if not already sent)
@@ -136,9 +137,9 @@ void loop() {
   
   // Serial.println("GSM synchronization completed");
   if(ipm.opt.gsm_call_ctrl && !ipm.opt.gsm_sms_ctrl && ipm.sta.init_gsm == 0xFF
-  && (millis() - gsm_call_timeout > 30000L)) { // If GSM call control is active and 30 seconds have passed since the last call attempt
+  && (millis() > gsm_call_timeout + 30000L)) { // If GSM call control is active and 30 seconds have passed since the last call attempt
     
-    Serial.println("Attempting to make GSM call... Timout: " + String(millis() - gsm_call_timeout) + " ms");
+    Serial.println("Attempting to make GSM call... Timout: " + String(gsm_call_timeout) + " ms");
     Serial.println("GSM call control state: " + String(ipm.opt.gsm_call_ctrl));
     gsm_call_timeout = millis(); // Update the last call attempt time
     // Implement GSM call control logic here (e.g., make a call if not already in progress)

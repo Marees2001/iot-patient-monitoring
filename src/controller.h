@@ -195,7 +195,7 @@ void gsm_receive_data(){
     // Re-arm DMA reception for the next payload
     memset(gsm_rx_buffer, 0, sizeof(gsm_rx_buffer));
     // Check for GSM responses
-    if(GSM_SERIAL.available()) {
+    while(GSM_SERIAL.available()) {
         int size = GSM_SERIAL.readBytes(gsm_rx_buffer, sizeof(gsm_rx_buffer) - 1); // Read GSM response into buffer
         if (size >= sizeof(gsm_rx_buffer) - 1) {
             memset(gsm_rx_buffer, 0, sizeof(gsm_rx_buffer)); // Clear buffer if overflow
@@ -296,9 +296,9 @@ void gsm_receive_data(){
         }else if(strstr(gsm_rx_buffer, "2.Doctor:")) {
             char buff[100],num[15];
             memset(num,0,sizeof(num));
-            char *doc_ptr = strstr(gsm_rx_buffer, "1.Doctor:");
+            char *doc_ptr = strstr(gsm_rx_buffer, "2.Doctor:");
             if(doc_ptr) {
-                sscanf(doc_ptr, "1.Doctor: %s", num);  // num not &num
+                sscanf(doc_ptr, "2.Doctor: %s", num);  // num not &num
                 // trim any \r\n at end
                 num[strcspn(num, "\r\n")] = 0;
                 Serial.printf("Doctor num: [%s]\n\r", num);
