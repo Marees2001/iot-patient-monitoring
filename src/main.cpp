@@ -2,6 +2,7 @@
 #include "controller.h"
 
 PulseOximeter hbt;
+MAX30100 hrm;
 DHT dht(TH_SENSOR_Pin, DHTTYPE);
 LiquidCrystal_I2C lcd(LCD_ADDR, LCD_COLS, LCD_ROWS); // I2C LCD display at address 0x27, 16 columns, 4 rows
 
@@ -13,6 +14,11 @@ uint8_t receive_bytes = 0;
 uint8_t pulse_sensor_status = 0; // 0: not initialized, 1: initialized successfully, 2: initialization failed
 uint8_t hbt_intrupt_status = 0; // 0: no interrupt, 1: beat detected interrupt;
 
+void onBeatDetected() {
+  Serial.println("Beat detected!");
+  hbt_intrupt_status = 1; // Set the heartbeat interrupt status to indicate a beat was detected
+}
+
 void read_th_sensor();
 void read_hrt_pulse();
 
@@ -20,7 +26,7 @@ void read_hrt_pulse();
 void setup() {
   // Initialize USB Serial (CDC) for USB debugging
   Serial.begin(115200);
-  delay(10000); // Wait for USB enumeration
+  delay(7000); // Wait for USB enumeration
   
   // Initialize USART1 for GSM module
   GSM_SERIAL.begin(9600);
@@ -75,14 +81,23 @@ void loop() {
   static unsigned long gsm_call_timeout = 0; 
   static unsigned long gsm_sms_timeout = 0;
   static unsigned long gsm_clean_storage_timeout = 0;
+  static unsigned long pulse_timout = 0; // Variable to track pulse sensor reading timing
   /*Function for receiving data from GSM module*/
   gsm_receive_data();
-
-  if(pulse_sensor_status == 1) {
-    hbt.update(); // Update pulse oximeter readings
+  
+  if(pulse_sensor_status == 1) { // Read pulse oximeter data every 2 seconds
+    hbt.update();
   }
 
-  if(millis() - gsm_sync_timeout > 2000) { // Check if 0.5 seconds have passed since the last GSM synchronization
+  if(millis() > pulse_timout + 10000){
+    pulse_timout = millis(); // Reset the pulse timeout to avoid resetting values immediately after a
+    hbt.resume(); // Resume pulse oximeter to ensure it continues to read data
+    hrm.resetFifo(); // Clear the FIFO buffer to avoid reading stale data
+    Serial.println("Pulse oximeter data reset to ensure fresh readings");
+  }
+
+
+  if(millis() > gsm_sync_timeout + 2000) { // Check if 0.5 seconds have passed since the last GSM synchronization
     gsm_sync_timeout = millis(); // Update the last synchronization time
     // Toggle LED state using STM32 HAL
     digitalToggle(STATUS_LED_Pin);      // Push to OLED
@@ -93,7 +108,7 @@ void loop() {
   }
 
   if(ipm.sta.init_gsm == 0xFF && !ipm.opt.gsm_sms_ctrl && !ipm.opt.gsm_call_ctrl
-    && (millis() - gsm_clean_storage_timeout > 60000)) { // Clean GSM storage every 60 seconds if GSM is fully initialized
+    && (millis() > gsm_clean_storage_timeout + 60000)) { // Clean GSM storage every 60 seconds if GSM is fully initialized
     gsm_clean_storage_timeout = millis(); // Update the last storage cleaning time
     clean_sim_storage();
     Serial.println("GSM storage cleaned");
@@ -182,9 +197,9 @@ void loop() {
   : digitalWrite(ALARM_BUZZER_Pin, LOW); // Set LED state based on alarm control
 
   
-  if(millis()-init_pulse_sensor_timeout > 5000 && pulse_sensor_status == 0) { // Try to initialize pulse sensor every 10 seconds if not initialized
+  if(millis() > init_pulse_sensor_timeout + 5000 && pulse_sensor_status == 0) { // Try to initialize pulse sensor every 10 seconds if not initialized
     init_pulse_sensor_timeout = millis(); // Update the last initialization attempt time
-    pulse_sensor_status = hbt.begin();
+    pulse_sensor_status = hbt.begin(PULSEOXIMETER_DEBUGGINGMODE_NONE);
     if(pulse_sensor_status) {
       Serial.println("Pulse oximeter initialized successfully");
       hbt.setOnBeatDetectedCallback(onBeatDetected);
@@ -206,7 +221,7 @@ void loop() {
     Serial.println("Sending AT command to GSM...");
   }
 
-  if(millis() - th_sensor_timeout > 2000){
+  if(millis() > th_sensor_timeout + 2000){
     th_sensor_timeout = millis();
     read_th_sensor();
   }
@@ -215,12 +230,12 @@ void loop() {
     hbt_intrupt_status = 0; // Reset the heartbeat interrupt status
     read_hrt_pulse(); // Read pulse and SpO2 values immediately when a beat is detected
     hbt_sensor_timeout = millis(); // Reset the sensor read timeout to avoid resetting values immediately after a beat is detected
-  }else if(millis() - hbt_sensor_timeout > 5000) { // If no beat detected, read pulse and SpO2 values every 2 seconds
+  }else if(millis() > hbt_sensor_timeout + 5000) { // If no beat detected, read pulse and SpO2 values every 2 seconds
     ipm.sta.hrt_value = 0; // Reset heart rate value if no beat detected for a while
     ipm.sta.spo_value = 0; // Reset SpO2 value if no beat detected for a while
   }
 
-  if(millis() - display_timout > 2000){
+  if(millis() > display_timout + 2000){
     //update_display();
     display_timout = millis();
     update_display();

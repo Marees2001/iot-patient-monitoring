@@ -5,12 +5,13 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <Arduino.h>
-#include "define.h"
 #include <Wire.h>
 #include "MAX30100_PulseOximeter.h"
+#include "MAX30100.h"
 #include <LiquidCrystal_I2C.h>
 #include "DHT.h"
 #include "flash.h"
+#include "define.h"
 
 extern char gsm_rx_buffer[200]; // Buffer for receiving data from GSM module
 extern uint8_t receive_bytes; // Number of bytes received from GSM module
@@ -19,6 +20,8 @@ extern PulseOximeter hbt;
 extern DHT dht; // DHT sensor object
 extern uint8_t pulse_sensor_status;
 extern uint8_t hbt_intrupt_status;
+
+uint8_t wait_sim_ready = 1; // Flag to track if we're waiting for SIM card to be ready
 
 /*Structure for controller status*/
 struct CONTROLLER_STATUS {
@@ -80,12 +83,6 @@ void init_display(){
     lcd.setCursor(3, 1);
     lcd.print("Monitoring");
     delay(2000);
-}
-
-
-void onBeatDetected() {
-    Serial.println("Beat detected!");
-    hbt_intrupt_status = 1; // Set the heartbeat interrupt status to indicate a beat was detected
 }
 
 void update_display() {
@@ -169,6 +166,10 @@ void read_hrt_pulse(){
 
 // GSM function for send data via UART
 void gsm_send_data(const char* data){
+    if(!wait_sim_ready) {
+        Serial.println("Waiting for SIM card to be ready before sending GSM data...");
+        return; // Don't send data if we're still waiting for the SIM card to be ready
+    }
     Serial.print(">> Sending: ");
     Serial.println(data);
     GSM_SERIAL.print(data);
@@ -207,11 +208,27 @@ void gsm_receive_data(){
     // Process the received data as needed
     if(!BITREAD(ipm.sta.init_gsm, 0) && strstr(gsm_rx_buffer, "OK")) {
         BITSET(ipm.sta.init_gsm, 0); // Basic command to check communication
-    } else if(!BITREAD(ipm.sta.init_gsm, 1) && strstr(gsm_rx_buffer, "+CSMINS:")) {
+    }else if(strstr(gsm_rx_buffer, "+CPIN:")) {
+        if(strstr(gsm_rx_buffer, "+CPIN: READY")) {
+            BITSET(ipm.sta.init_gsm, 1); // Mark SIM card status as received
+            wait_sim_ready = 1; // Set flag to indicate we're waiting for SIM card to be ready
+            Serial.println("SIM card is ready");
+        } else {
+            wait_sim_ready = 0; // Set flag to indicate we're waiting for SIM card to be ready
+            BITCLEAR(ipm.sta.init_gsm, 1); // Clear SIM card status bit
+            Serial.println("SIM card not ready or not detected,Reboot mcu to retry");
+        }
+    }else if(strstr(gsm_rx_buffer, "ERROR")) {
+        wait_sim_ready = 0; // Set flag to indicate we're waiting for SIM card to be ready
+        Serial.println("SIM card not ready or not detected,Reboot mcu to retry");
+        BITCLEAR(ipm.sta.init_gsm, 1); // Clear SIM card status bit
+    }else if(!BITREAD(ipm.sta.init_gsm, 1) && strstr(gsm_rx_buffer, "+CSMINS:")) {
         sscanf(gsm_rx_buffer, "+CSMINS: %*d,%d", &ipm.sta.sim_status);
+        Serial.printf("SIM card status: %d\n\r", ipm.sta.sim_status);
         BITSET(ipm.sta.init_gsm, 1); // Mark SIM card status as received
     } else if(!BITREAD(ipm.sta.init_gsm, 3) && strstr(gsm_rx_buffer, "+CSQ:")) {
         sscanf(gsm_rx_buffer, "+CSQ: %d,%*d", &ipm.sta.rssi);
+        Serial.printf("GSM signal strength (RSSI): %d\n\r", ipm.sta.rssi);
         BITSET(ipm.sta.init_gsm, 3); // Mark RSSI as received
     } else if(!BITREAD(ipm.sta.init_gsm, 4) && strstr(gsm_rx_buffer,"OK")) {
         BITSET(ipm.sta.init_gsm, 4); // Mark SMS mode set as done
@@ -408,7 +425,7 @@ void sync_gsm() {
     BITSET(ipm.sta.init_gsm, 2); // Mark UART configured as done
 	Serial.printf("GSM Send cmd -%x\n\r",ipm.sta.init_gsm);
     if(!BITREAD(ipm.sta.init_gsm, 0)) gsm_send_data("ATE0"); // Basic command to check communication
-    else if(!BITREAD(ipm.sta.init_gsm, 1)) gsm_send_data("AT+CSMINS?"); // Check SIM card status
+    else if(!BITREAD(ipm.sta.init_gsm, 1)) gsm_send_data("AT+CPIN?"); // Check SIM card status
     else if(!BITREAD(ipm.sta.init_gsm, 3)) gsm_send_data("AT+CSQ"); // Check signal quality
     else if(!BITREAD(ipm.sta.init_gsm, 4)) gsm_send_data("AT+CMGF=1"); // Set SMS mode is string mode
     else if(!BITREAD(ipm.sta.init_gsm, 5)) {
@@ -423,7 +440,6 @@ void sync_gsm() {
 
 void init_controler(){
     // Initialize LED pin
-    delay(1000);
     pinMode(STATUS_LED_Pin, OUTPUT);
     digitalWrite(STATUS_LED_Pin, LOW); // LED off (inverted logic on Blue Pill)
 
